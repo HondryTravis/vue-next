@@ -5,22 +5,24 @@ import {
   ElementWithTransition,
   getTransitionInfo,
   resolveTransitionProps,
-  TransitionPropsValidators
+  TransitionPropsValidators,
+  forceReflow
 } from './Transition'
 import {
   Fragment,
-  Comment,
   VNode,
   warn,
   resolveTransitionHooks,
-  toRaw,
   useTransitionState,
+  getTransitionRawChildren,
   getCurrentInstance,
   setTransitionHooks,
   createVNode,
   onUpdated,
-  SetupContext
+  SetupContext,
+  toRaw
 } from '@vue/runtime-core'
+import { extend } from '@vue/shared'
 
 interface Position {
   top: number
@@ -36,12 +38,18 @@ export type TransitionGroupProps = Omit<TransitionProps, 'mode'> & {
 }
 
 const TransitionGroupImpl = {
+  name: 'TransitionGroup',
+
+  props: /*#__PURE__*/ extend({}, TransitionPropsValidators, {
+    tag: String,
+    moveClass: String
+  }),
+
   setup(props: TransitionGroupProps, { slots }: SetupContext) {
     const instance = getCurrentInstance()!
     const state = useTransitionState()
     let prevChildren: VNode[]
     let children: VNode[]
-    let hasMove: boolean | null = null
 
     onUpdated(() => {
       // children is guaranteed to exist after initial render
@@ -49,16 +57,14 @@ const TransitionGroupImpl = {
         return
       }
       const moveClass = props.moveClass || `${props.name || 'v'}-move`
-      // Check if move transition is needed. This check is cached per-instance.
-      hasMove =
-        hasMove === null
-          ? (hasMove = hasCSSTransform(
-              prevChildren[0].el as ElementWithTransition,
-              instance.vnode.el as Node,
-              moveClass
-            ))
-          : hasMove
-      if (!hasMove) {
+
+      if (
+        !hasCSSTransform(
+          prevChildren[0].el as ElementWithTransition,
+          instance.vnode.el as Node,
+          moveClass
+        )
+      ) {
         return
       }
 
@@ -95,12 +101,7 @@ const TransitionGroupImpl = {
       const cssTransitionProps = resolveTransitionProps(rawProps)
       const tag = rawProps.tag || Fragment
       prevChildren = children
-      children = slots.default ? slots.default() : []
-
-      // handle fragment children case, e.g. v-for
-      if (children.length === 1 && children[0].type === Fragment) {
-        children = children[0].children as VNode[]
-      }
+      children = slots.default ? getTransitionRawChildren(slots.default()) : []
 
       for (let i = 0; i < children.length; i++) {
         const child = children[i]
@@ -109,7 +110,7 @@ const TransitionGroupImpl = {
             child,
             resolveTransitionHooks(child, cssTransitionProps, state, instance)
           )
-        } else if (__DEV__ && child.type !== Comment) {
+        } else if (__DEV__) {
           warn(`<TransitionGroup> children must be keyed.`)
         }
       }
@@ -130,19 +131,19 @@ const TransitionGroupImpl = {
   }
 }
 
+/**
+ * TransitionGroup does not support "mode" so we need to remove it from the
+ * props declarations, but direct delete operation is considered a side effect
+ * and will make the entire transition feature non-tree-shakeable, so we do it
+ * in a function and mark the function's invocation as pure.
+ */
+const removeMode = (props: any) => delete props.mode
+/*#__PURE__*/ removeMode(TransitionGroupImpl.props)
+
 export const TransitionGroup = (TransitionGroupImpl as unknown) as {
   new (): {
     $props: TransitionGroupProps
   }
-}
-
-if (__DEV__) {
-  const props = ((TransitionGroup as any).props = {
-    ...TransitionPropsValidators,
-    tag: String,
-    moveClass: String
-  })
-  delete props.mode
 }
 
 function callPendingCbs(c: VNode) {
@@ -170,11 +171,6 @@ function applyTranslation(c: VNode): VNode | undefined {
     s.transitionDuration = '0s'
     return c
   }
-}
-
-// this is put in a dedicated function to avoid the line from being treeshaken
-function forceReflow() {
-  return document.body.offsetHeight
 }
 
 function hasCSSTransform(

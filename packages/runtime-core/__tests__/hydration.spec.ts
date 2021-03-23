@@ -4,15 +4,14 @@ import {
   ref,
   nextTick,
   VNode,
-  Portal,
+  Teleport,
   createStaticVNode,
   Suspense,
   onMounted,
-  defineAsyncComponent
+  defineAsyncComponent,
+  defineComponent
 } from '@vue/runtime-dom'
-import { renderToString } from '@vue/server-renderer'
-import { mockWarn } from '@vue/shared'
-import { SSRContext } from 'packages/server-renderer/src/renderToString'
+import { renderToString, SSRContext } from '@vue/server-renderer'
 
 function mountWithHydration(html: string, render: () => any) {
   const container = document.createElement('div')
@@ -34,7 +33,9 @@ const triggerEvent = (type: string, el: Element) => {
 }
 
 describe('SSR hydration', () => {
-  mockWarn()
+  beforeEach(() => {
+    document.body.innerHTML = ''
+  })
 
   test('text', async () => {
     const msg = ref('foo')
@@ -55,10 +56,31 @@ describe('SSR hydration', () => {
   test('static', () => {
     const html = '<div><span>hello</span></div>'
     const { vnode, container } = mountWithHydration(html, () =>
-      createStaticVNode(html)
+      createStaticVNode('', 1)
     )
     expect(vnode.el).toBe(container.firstChild)
     expect(vnode.el.outerHTML).toBe(html)
+    expect(vnode.anchor).toBe(container.firstChild)
+    expect(vnode.children).toBe(html)
+  })
+
+  test('static (multiple elements)', () => {
+    const staticContent = '<div></div><span>hello</span>'
+    const html = `<div><div>hi</div>` + staticContent + `<div>ho</div></div>`
+
+    const n1 = h('div', 'hi')
+    const s = createStaticVNode('', 2)
+    const n2 = h('div', 'ho')
+
+    const { container } = mountWithHydration(html, () => h('div', [n1, s, n2]))
+
+    const div = container.firstChild!
+
+    expect(n1.el).toBe(div.firstChild)
+    expect(n2.el).toBe(div.lastChild)
+    expect(s.el).toBe(div.childNodes[1])
+    expect(s.anchor).toBe(div.childNodes[2])
+    expect(s.children).toBe(staticContent)
   })
 
   test('element with text children', async () => {
@@ -100,6 +122,15 @@ describe('SSR hydration', () => {
     msg.value = 'bar'
     await nextTick()
     expect(vnode.el.innerHTML).toBe(`<span>bar</span><span class="bar"></span>`)
+  })
+
+  test('element with ref', () => {
+    const el = ref()
+    const { vnode, container } = mountWithHydration('<div></div>', () =>
+      h('div', { ref: el })
+    )
+    expect(vnode.el).toBe(container.firstChild)
+    expect(el.value).toBe(vnode.el)
   })
 
   test('Fragment', async () => {
@@ -153,18 +184,18 @@ describe('SSR hydration', () => {
     )
   })
 
-  test('Portal', async () => {
+  test('Teleport', async () => {
     const msg = ref('foo')
     const fn = jest.fn()
-    const portalContainer = document.createElement('div')
-    portalContainer.id = 'portal'
-    portalContainer.innerHTML = `<span>foo</span><span class="foo"></span><!---->`
-    document.body.appendChild(portalContainer)
+    const teleportContainer = document.createElement('div')
+    teleportContainer.id = 'teleport'
+    teleportContainer.innerHTML = `<span>foo</span><span class="foo"></span><!---->`
+    document.body.appendChild(teleportContainer)
 
     const { vnode, container } = mountWithHydration(
-      '<!--portal start--><!--portal end-->',
+      '<!--teleport start--><!--teleport end-->',
       () =>
-        h(Portal, { target: '#portal' }, [
+        h(Teleport, { to: '#teleport' }, [
           h('span', msg.value),
           h('span', { class: msg.value, onClick: fn })
         ])
@@ -173,120 +204,120 @@ describe('SSR hydration', () => {
     expect(vnode.el).toBe(container.firstChild)
     expect(vnode.anchor).toBe(container.lastChild)
 
-    expect(vnode.target).toBe(portalContainer)
+    expect(vnode.target).toBe(teleportContainer)
     expect((vnode.children as VNode[])[0].el).toBe(
-      portalContainer.childNodes[0]
+      teleportContainer.childNodes[0]
     )
     expect((vnode.children as VNode[])[1].el).toBe(
-      portalContainer.childNodes[1]
+      teleportContainer.childNodes[1]
     )
-    expect(vnode.targetAnchor).toBe(portalContainer.childNodes[2])
+    expect(vnode.targetAnchor).toBe(teleportContainer.childNodes[2])
 
     // event handler
-    triggerEvent('click', portalContainer.querySelector('.foo')!)
+    triggerEvent('click', teleportContainer.querySelector('.foo')!)
     expect(fn).toHaveBeenCalled()
 
     msg.value = 'bar'
     await nextTick()
-    expect(portalContainer.innerHTML).toBe(
+    expect(teleportContainer.innerHTML).toBe(
       `<span>bar</span><span class="bar"></span><!---->`
     )
   })
 
-  test('Portal (multiple + integration)', async () => {
+  test('Teleport (multiple + integration)', async () => {
     const msg = ref('foo')
     const fn1 = jest.fn()
     const fn2 = jest.fn()
 
     const Comp = () => [
-      h(Portal, { target: '#portal2' }, [
+      h(Teleport, { to: '#teleport2' }, [
         h('span', msg.value),
         h('span', { class: msg.value, onClick: fn1 })
       ]),
-      h(Portal, { target: '#portal2' }, [
+      h(Teleport, { to: '#teleport2' }, [
         h('span', msg.value + '2'),
         h('span', { class: msg.value + '2', onClick: fn2 })
       ])
     ]
 
-    const portalContainer = document.createElement('div')
-    portalContainer.id = 'portal2'
+    const teleportContainer = document.createElement('div')
+    teleportContainer.id = 'teleport2'
     const ctx: SSRContext = {}
     const mainHtml = await renderToString(h(Comp), ctx)
     expect(mainHtml).toMatchInlineSnapshot(
-      `"<!--[--><!--portal start--><!--portal end--><!--portal start--><!--portal end--><!--]-->"`
+      `"<!--[--><!--teleport start--><!--teleport end--><!--teleport start--><!--teleport end--><!--]-->"`
     )
 
-    const portalHtml = ctx.portals!['#portal2']
-    expect(portalHtml).toMatchInlineSnapshot(
+    const teleportHtml = ctx.teleports!['#teleport2']
+    expect(teleportHtml).toMatchInlineSnapshot(
       `"<span>foo</span><span class=\\"foo\\"></span><!----><span>foo2</span><span class=\\"foo2\\"></span><!---->"`
     )
 
-    portalContainer.innerHTML = portalHtml
-    document.body.appendChild(portalContainer)
+    teleportContainer.innerHTML = teleportHtml
+    document.body.appendChild(teleportContainer)
 
     const { vnode, container } = mountWithHydration(mainHtml, Comp)
     expect(vnode.el).toBe(container.firstChild)
-    const portalVnode1 = (vnode.children as VNode[])[0]
-    const portalVnode2 = (vnode.children as VNode[])[1]
-    expect(portalVnode1.el).toBe(container.childNodes[1])
-    expect(portalVnode1.anchor).toBe(container.childNodes[2])
-    expect(portalVnode2.el).toBe(container.childNodes[3])
-    expect(portalVnode2.anchor).toBe(container.childNodes[4])
+    const teleportVnode1 = (vnode.children as VNode[])[0]
+    const teleportVnode2 = (vnode.children as VNode[])[1]
+    expect(teleportVnode1.el).toBe(container.childNodes[1])
+    expect(teleportVnode1.anchor).toBe(container.childNodes[2])
+    expect(teleportVnode2.el).toBe(container.childNodes[3])
+    expect(teleportVnode2.anchor).toBe(container.childNodes[4])
 
-    expect(portalVnode1.target).toBe(portalContainer)
-    expect((portalVnode1 as any).children[0].el).toBe(
-      portalContainer.childNodes[0]
+    expect(teleportVnode1.target).toBe(teleportContainer)
+    expect((teleportVnode1 as any).children[0].el).toBe(
+      teleportContainer.childNodes[0]
     )
-    expect(portalVnode1.targetAnchor).toBe(portalContainer.childNodes[2])
+    expect(teleportVnode1.targetAnchor).toBe(teleportContainer.childNodes[2])
 
-    expect(portalVnode2.target).toBe(portalContainer)
-    expect((portalVnode2 as any).children[0].el).toBe(
-      portalContainer.childNodes[3]
+    expect(teleportVnode2.target).toBe(teleportContainer)
+    expect((teleportVnode2 as any).children[0].el).toBe(
+      teleportContainer.childNodes[3]
     )
-    expect(portalVnode2.targetAnchor).toBe(portalContainer.childNodes[5])
+    expect(teleportVnode2.targetAnchor).toBe(teleportContainer.childNodes[5])
 
     // // event handler
-    triggerEvent('click', portalContainer.querySelector('.foo')!)
+    triggerEvent('click', teleportContainer.querySelector('.foo')!)
     expect(fn1).toHaveBeenCalled()
 
-    triggerEvent('click', portalContainer.querySelector('.foo2')!)
+    triggerEvent('click', teleportContainer.querySelector('.foo2')!)
     expect(fn2).toHaveBeenCalled()
 
     msg.value = 'bar'
     await nextTick()
-    expect(portalContainer.innerHTML).toMatchInlineSnapshot(
+    expect(teleportContainer.innerHTML).toMatchInlineSnapshot(
       `"<span>bar</span><span class=\\"bar\\"></span><!----><span>bar2</span><span class=\\"bar2\\"></span><!---->"`
     )
   })
 
-  test('Portal (disabled)', async () => {
+  test('Teleport (disabled)', async () => {
     const msg = ref('foo')
     const fn1 = jest.fn()
     const fn2 = jest.fn()
 
     const Comp = () => [
       h('div', 'foo'),
-      h(Portal, { target: '#portal3', disabled: true }, [
+      h(Teleport, { to: '#teleport3', disabled: true }, [
         h('span', msg.value),
         h('span', { class: msg.value, onClick: fn1 })
       ]),
       h('div', { class: msg.value + '2', onClick: fn2 }, 'bar')
     ]
 
-    const portalContainer = document.createElement('div')
-    portalContainer.id = 'portal3'
+    const teleportContainer = document.createElement('div')
+    teleportContainer.id = 'teleport3'
     const ctx: SSRContext = {}
     const mainHtml = await renderToString(h(Comp), ctx)
     expect(mainHtml).toMatchInlineSnapshot(
-      `"<!--[--><div>foo</div><!--portal start--><span>foo</span><span class=\\"foo\\"></span><!--portal end--><div class=\\"foo2\\">bar</div><!--]-->"`
+      `"<!--[--><div>foo</div><!--teleport start--><span>foo</span><span class=\\"foo\\"></span><!--teleport end--><div class=\\"foo2\\">bar</div><!--]-->"`
     )
 
-    const portalHtml = ctx.portals!['#portal3']
-    expect(portalHtml).toMatchInlineSnapshot(`"<!---->"`)
+    const teleportHtml = ctx.teleports!['#teleport3']
+    expect(teleportHtml).toMatchInlineSnapshot(`"<!---->"`)
 
-    portalContainer.innerHTML = portalHtml
-    document.body.appendChild(portalContainer)
+    teleportContainer.innerHTML = teleportHtml
+    document.body.appendChild(teleportContainer)
 
     const { vnode, container } = mountWithHydration(mainHtml, Comp)
     expect(vnode.el).toBe(container.firstChild)
@@ -294,19 +325,19 @@ describe('SSR hydration', () => {
 
     expect(children[0].el).toBe(container.childNodes[1])
 
-    const portalVnode = children[1]
-    expect(portalVnode.el).toBe(container.childNodes[2])
-    expect((portalVnode.children as VNode[])[0].el).toBe(
+    const teleportVnode = children[1]
+    expect(teleportVnode.el).toBe(container.childNodes[2])
+    expect((teleportVnode.children as VNode[])[0].el).toBe(
       container.childNodes[3]
     )
-    expect((portalVnode.children as VNode[])[1].el).toBe(
+    expect((teleportVnode.children as VNode[])[1].el).toBe(
       container.childNodes[4]
     )
-    expect(portalVnode.anchor).toBe(container.childNodes[5])
+    expect(teleportVnode.anchor).toBe(container.childNodes[5])
     expect(children[2].el).toBe(container.childNodes[6])
 
-    expect(portalVnode.target).toBe(portalContainer)
-    expect(portalVnode.targetAnchor).toBe(portalContainer.childNodes[0])
+    expect(teleportVnode.target).toBe(teleportContainer)
+    expect(teleportVnode.targetAnchor).toBe(teleportContainer.childNodes[0])
 
     // // event handler
     triggerEvent('click', container.querySelector('.foo')!)
@@ -318,7 +349,7 @@ describe('SSR hydration', () => {
     msg.value = 'bar'
     await nextTick()
     expect(container.innerHTML).toMatchInlineSnapshot(
-      `"<!--[--><div>foo</div><!--portal start--><span>bar</span><span class=\\"bar\\"></span><!--portal end--><div class=\\"bar2\\">bar</div><!--]-->"`
+      `"<!--[--><div>foo</div><!--teleport start--><span>bar</span><span class=\\"bar\\"></span><!--teleport end--><div class=\\"bar2\\">bar</div><!--]-->"`
     )
   })
 
@@ -448,8 +479,9 @@ describe('SSR hydration', () => {
     const mountedCalls: number[] = []
     const asyncDeps: Promise<any>[] = []
 
-    const AsyncChild = {
-      async setup(props: { n: number }) {
+    const AsyncChild = defineComponent({
+      props: ['n'],
+      async setup(props) {
         const count = ref(props.n)
         onMounted(() => {
           mountedCalls.push(props.n)
@@ -468,14 +500,16 @@ describe('SSR hydration', () => {
             count.value
           )
       }
-    }
+    })
 
     const done = jest.fn()
     const App = {
       template: `
       <Suspense @resolve="done">
-        <AsyncChild :n="1" />
-        <AsyncChild :n="2" />
+        <div>
+          <AsyncChild :n="1" />
+          <AsyncChild :n="2" />
+        </div>
       </Suspense>`,
       components: {
         AsyncChild
@@ -489,7 +523,7 @@ describe('SSR hydration', () => {
     // server render
     container.innerHTML = await renderToString(h(App))
     expect(container.innerHTML).toMatchInlineSnapshot(
-      `"<!--[--><span>1</span><span>2</span><!--]-->"`
+      `"<div><span>1</span><span>2</span></div>"`
     )
     // reset asyncDeps from ssr
     asyncDeps.length = 0
@@ -505,17 +539,23 @@ describe('SSR hydration', () => {
 
     // should flush buffered effects
     expect(mountedCalls).toMatchObject([1, 2])
-    expect(container.innerHTML).toMatch(`<span>1</span><span>2</span>`)
+    expect(container.innerHTML).toMatch(
+      `<div><span>1</span><span>2</span></div>`
+    )
 
     const span1 = container.querySelector('span')!
     triggerEvent('click', span1)
     await nextTick()
-    expect(container.innerHTML).toMatch(`<span>2</span><span>2</span>`)
+    expect(container.innerHTML).toMatch(
+      `<div><span>2</span><span>2</span></div>`
+    )
 
     const span2 = span1.nextSibling as Element
     triggerEvent('click', span2)
     await nextTick()
-    expect(container.innerHTML).toMatch(`<span>2</span><span>3</span>`)
+    expect(container.innerHTML).toMatch(
+      `<div><span>2</span><span>3</span></div>`
+    )
   })
 
   test('async component', async () => {
@@ -575,6 +615,20 @@ describe('SSR hydration', () => {
     // should be hydrated now
     triggerEvent('click', container.querySelector('button')!)
     expect(spy).toHaveBeenCalled()
+  })
+
+  test('SVG as a mount container', () => {
+    const svgContainer = document.createElement('svg')
+    svgContainer.innerHTML = '<g></g>'
+    const app = createSSRApp({
+      render: () => h('g')
+    })
+
+    expect(
+      (app.mount(svgContainer).$.subTree as VNode<Node, Element> & {
+        el: Element
+      }).el instanceof SVGElement
+    )
   })
 
   describe('mismatch handling', () => {
@@ -651,7 +705,19 @@ describe('SSR hydration', () => {
       // fragment ends early and attempts to hydrate the extra <div>bar</div>
       // as 2nd fragment child.
       expect(`Hydration text content mismatch`).toHaveBeenWarned()
-      // exccesive children removal
+      // excessive children removal
+      expect(`Hydration children mismatch`).toHaveBeenWarned()
+    })
+
+    test('Teleport target has empty children', () => {
+      const teleportContainer = document.createElement('div')
+      teleportContainer.id = 'teleport'
+      document.body.appendChild(teleportContainer)
+
+      mountWithHydration('<!--teleport start--><!--teleport end-->', () =>
+        h(Teleport, { to: '#teleport' }, [h('span', 'value')])
+      )
+      expect(teleportContainer.innerHTML).toBe(`<span>value</span>`)
       expect(`Hydration children mismatch`).toHaveBeenWarned()
     })
   })

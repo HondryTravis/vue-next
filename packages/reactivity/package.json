@@ -1,11 +1,12 @@
 {
   "name": "@vue/reactivity",
-  "version": "3.0.0-alpha.10",
+  "version": "3.0.7",
   "description": "@vue/reactivity",
   "main": "index.js",
   "module": "dist/reactivity.esm-bundler.js",
   "types": "dist/reactivity.d.ts",
   "unpkg": "dist/reactivity.global.js",
+  "jsdelivr": "dist/reactivity.global.js",
   "files": [
     "index.js",
     "dist"
@@ -13,15 +14,16 @@
   "sideEffects": false,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vuejs/vue-next.git"
+    "url": "git+https://github.com/vuejs/vue-next.git",
+    "directory": "packages/reactivity"
   },
   "buildOptions": {
     "name": "VueReactivity",
     "formats": [
       "esm-bundler",
+      "esm-browser",
       "cjs",
-      "global",
-      "esm"
+      "global"
     ]
   },
   "keywords": [
@@ -34,6 +36,6 @@
   },
   "homepage": "https://github.com/vuejs/vue-next/tree/master/packages/reactivity#readme",
   "dependencies": {
-    "@vue/shared": "3.0.0-alpha.10"
+    "@vue/shared": "3.0.7"
   }
 }

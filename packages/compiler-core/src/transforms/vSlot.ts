@@ -14,7 +14,6 @@ import {
   SourceLocation,
   createConditionalExpression,
   ConditionalExpression,
-  JSChildNode,
   SimpleExpressionNode,
   FunctionExpression,
   CallExpression,
@@ -24,12 +23,17 @@ import {
 } from '../ast'
 import { TransformContext, NodeTransform } from '../transform'
 import { createCompilerError, ErrorCodes } from '../errors'
-import { findDir, isTemplateNode, assert, isVSlot, hasScopeRef } from '../utils'
+import {
+  findDir,
+  isTemplateNode,
+  assert,
+  isVSlot,
+  hasScopeRef,
+  isStaticExp
+} from '../utils'
 import { CREATE_SLOTS, RENDER_LIST, WITH_CTX } from '../runtimeHelpers'
 import { parseForExpression, createForLoopParams } from './vFor'
-
-const isStaticExp = (p: JSChildNode): p is SimpleExpressionNode =>
-  p.type === NodeTypes.SIMPLE_EXPRESSION && p.isStatic
+import { SlotFlags, slotFlagsText } from '@vue/shared'
 
 const defaultFallback = createSimpleExpression(`undefined`, false)
 
@@ -135,21 +139,24 @@ export function buildSlots(
   let hasDynamicSlots = context.scopes.vSlot > 0 || context.scopes.vFor > 0
   // with `prefixIdentifiers: true`, this can be further optimized to make
   // it dynamic only when the slot actually uses the scope variables.
-  if (!__BROWSER__ && context.prefixIdentifiers) {
+  if (!__BROWSER__ && !context.ssr && context.prefixIdentifiers) {
     hasDynamicSlots = hasScopeRef(node, context.identifiers)
   }
 
-  // 1. Check for default slot with slotProps on component itself.
+  // 1. Check for slot with slotProps on component itself.
   //    <Comp v-slot="{ prop }"/>
-  const onComponentDefaultSlot = findDir(node, 'slot', true)
-  if (onComponentDefaultSlot) {
-    const { arg, exp, loc } = onComponentDefaultSlot
-    if (arg) {
-      context.onError(
-        createCompilerError(ErrorCodes.X_V_SLOT_NAMED_SLOT_ON_COMPONENT, loc)
-      )
+  const onComponentSlot = findDir(node, 'slot', true)
+  if (onComponentSlot) {
+    const { arg, exp } = onComponentSlot
+    if (arg && !isStaticExp(arg)) {
+      hasDynamicSlots = true
     }
-    slotsProperties.push(buildDefaultSlotProperty(exp, children))
+    slotsProperties.push(
+      createObjectProperty(
+        arg || createSimpleExpression('default', true),
+        buildSlotFn(exp, children, loc)
+      )
+    )
   }
 
   // 2. Iterate through children and check for template slots
@@ -174,8 +181,8 @@ export function buildSlots(
       continue
     }
 
-    if (onComponentDefaultSlot) {
-      // already has on-component default slot - this is incorrect usage.
+    if (onComponentSlot) {
+      // already has on-component slot - this is incorrect usage.
       context.onError(
         createCompilerError(ErrorCodes.X_V_SLOT_MIXED_SLOT_USAGE, slotDir.loc)
       )
@@ -294,7 +301,7 @@ export function buildSlots(
     }
   }
 
-  if (!onComponentDefaultSlot) {
+  if (!onComponentSlot) {
     if (!hasTemplateSlots) {
       // implicit default slot (on component)
       slotsProperties.push(buildDefaultSlotProperty(undefined, children))
@@ -315,9 +322,23 @@ export function buildSlots(
     }
   }
 
+  const slotFlag = hasDynamicSlots
+    ? SlotFlags.DYNAMIC
+    : hasForwardedSlots(node.children)
+      ? SlotFlags.FORWARDED
+      : SlotFlags.STABLE
+
   let slots = createObjectExpression(
     slotsProperties.concat(
-      createObjectProperty(`_`, createSimpleExpression(`1`, false))
+      createObjectProperty(
+        `_`,
+        // 2 = compiled but dynamic = can skip normalization, but must run diff
+        // 1 = compiled and static = can skip normalization AND diff as optimized
+        createSimpleExpression(
+          slotFlag + (__DEV__ ? ` /* ${slotFlagsText[slotFlag]} */` : ``),
+          false
+        )
+      )
     ),
     loc
   ) as SlotsExpression
@@ -342,4 +363,31 @@ function buildDynamicSlot(
     createObjectProperty(`name`, name),
     createObjectProperty(`fn`, fn)
   ])
+}
+
+function hasForwardedSlots(children: TemplateChildNode[]): boolean {
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]
+    switch (child.type) {
+      case NodeTypes.ELEMENT:
+        if (
+          child.tagType === ElementTypes.SLOT ||
+          (child.tagType === ElementTypes.ELEMENT &&
+            hasForwardedSlots(child.children))
+        ) {
+          return true
+        }
+        break
+      case NodeTypes.IF:
+        if (hasForwardedSlots(child.branches)) return true
+        break
+      case NodeTypes.IF_BRANCH:
+      case NodeTypes.FOR:
+        if (hasForwardedSlots(child.children)) return true
+        break
+      default:
+        break
+    }
+  }
+  return false
 }

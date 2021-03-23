@@ -1,18 +1,15 @@
 import { RendererOptions } from '@vue/runtime-core'
 
+export const svgNS = 'http://www.w3.org/2000/svg'
+
 const doc = (typeof document !== 'undefined' ? document : null) as Document
-const svgNS = 'http://www.w3.org/2000/svg'
 
 let tempContainer: HTMLElement
 let tempSVGContainer: SVGElement
 
 export const nodeOps: Omit<RendererOptions<Node, Element>, 'patchProp'> = {
   insert: (child, parent, anchor) => {
-    if (anchor) {
-      parent.insertBefore(child, anchor)
-    } else {
-      parent.appendChild(child)
-    }
+    parent.insertBefore(child, anchor || null)
   },
 
   remove: child => {
@@ -63,8 +60,14 @@ export const nodeOps: Omit<RendererOptions<Node, Element>, 'patchProp'> = {
         (tempSVGContainer = doc.createElementNS(svgNS, 'svg'))
       : tempContainer || (tempContainer = doc.createElement('div'))
     temp.innerHTML = content
-    const node = temp.children[0]
-    nodeOps.insert(node, parent, anchor)
-    return node
+    const first = temp.firstChild as Element
+    let node: Element | null = first
+    let last: Element = node
+    while (node) {
+      last = node
+      nodeOps.insert(node, parent, anchor)
+      node = temp.firstChild as Element
+    }
+    return [first, last]
   }
 }

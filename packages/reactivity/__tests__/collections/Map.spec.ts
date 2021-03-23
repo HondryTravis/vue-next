@@ -1,6 +1,13 @@
 import { reactive, effect, toRaw, isReactive } from '../../src'
 
 describe('reactivity/collections', () => {
+  function coverCollectionFn(collection: Map<any, any>, fnName: string) {
+    const spy = jest.fn()
+    let proxy = reactive(collection)
+    ;(collection as any)[fnName] = spy
+    return [proxy as any, spy]
+  }
+
   describe('Map', () => {
     test('instanceof', () => {
       const original = new Map()
@@ -363,6 +370,51 @@ describe('reactivity/collections', () => {
       expect(map.get(key)).toBeUndefined()
     })
 
+    it('should track set of reactive keys in raw map', () => {
+      const raw = new Map()
+      const key = reactive({})
+      raw.set(key, 1)
+      const map = reactive(raw)
+
+      let dummy
+      effect(() => {
+        dummy = map.get(key)
+      })
+      expect(dummy).toBe(1)
+
+      map.set(key, 2)
+      expect(dummy).toBe(2)
+    })
+
+    it('should track deletion of reactive keys in raw map', () => {
+      const raw = new Map()
+      const key = reactive({})
+      raw.set(key, 1)
+      const map = reactive(raw)
+
+      let dummy
+      effect(() => {
+        dummy = map.has(key)
+      })
+      expect(dummy).toBe(true)
+
+      map.delete(key)
+      expect(dummy).toBe(false)
+    })
+
+    it('should warn when both raw and reactive versions of the same object is used as key', () => {
+      const raw = new Map()
+      const rawKey = {}
+      const key = reactive(rawKey)
+      raw.set(rawKey, 1)
+      raw.set(key, 1)
+      const map = reactive(raw)
+      map.set(key, 2)
+      expect(
+        `Reactive Map contains both the raw and reactive`
+      ).toHaveBeenWarned()
+    })
+
     // #877
     it('should not trigger key iteration when setting existing keys', () => {
       const map = reactive(new Map())
@@ -390,6 +442,36 @@ describe('reactivity/collections', () => {
       // keys didn't change, should not trigger
       map.set('b', 1)
       expect(spy).toHaveBeenCalledTimes(3)
+    })
+
+    it('should trigger Map.has only once for non-reactive keys', () => {
+      const [proxy, spy] = coverCollectionFn(new Map(), 'has')
+      proxy.has('k')
+      expect(spy).toBeCalledTimes(1)
+    })
+
+    it('should trigger Map.set only once for non-reactive keys', () => {
+      const [proxy, spy] = coverCollectionFn(new Map(), 'set')
+      proxy.set('k', 'v')
+      expect(spy).toBeCalledTimes(1)
+    })
+
+    it('should trigger Map.delete only once for non-reactive keys', () => {
+      const [proxy, spy] = coverCollectionFn(new Map(), 'delete')
+      proxy.delete('foo')
+      expect(spy).toBeCalledTimes(1)
+    })
+
+    it('should trigger Map.clear only once for non-reactive keys', () => {
+      const [proxy, spy] = coverCollectionFn(new Map(), 'clear')
+      proxy.clear()
+      expect(spy).toBeCalledTimes(1)
+    })
+
+    it('should return proxy from Map.set call', () => {
+      const map = reactive(new Map())
+      const result = map.set('a', 'a')
+      expect(result).toBe(map)
     })
   })
 })

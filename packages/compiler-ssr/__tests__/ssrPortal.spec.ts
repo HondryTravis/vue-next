@@ -1,13 +1,13 @@
 import { compile } from '../src'
 
-describe('ssr compile: portal', () => {
+describe('ssr compile: teleport', () => {
   test('should work', () => {
-    expect(compile(`<portal :target="target"><div/></portal>`).code)
+    expect(compile(`<teleport :to="target"><div/></teleport>`).code)
       .toMatchInlineSnapshot(`
-      "const { ssrRenderPortal: _ssrRenderPortal } = require(\\"@vue/server-renderer\\")
+      "const { ssrRenderTeleport: _ssrRenderTeleport } = require(\\"@vue/server-renderer\\")
 
-      return function ssrRender(_ctx, _push, _parent) {
-        _ssrRenderPortal(_push, (_push) => {
+      return function ssrRender(_ctx, _push, _parent, _attrs) {
+        _ssrRenderTeleport(_push, (_push) => {
           _push(\`<div></div>\`)
         }, _ctx.target, false, _parent)
       }"
@@ -15,27 +15,27 @@ describe('ssr compile: portal', () => {
   })
 
   test('disabled prop handling', () => {
-    expect(compile(`<portal :target="target" disabled><div/></portal>`).code)
+    expect(compile(`<teleport :to="target" disabled><div/></teleport>`).code)
       .toMatchInlineSnapshot(`
-    "const { ssrRenderPortal: _ssrRenderPortal } = require(\\"@vue/server-renderer\\")
+      "const { ssrRenderTeleport: _ssrRenderTeleport } = require(\\"@vue/server-renderer\\")
 
-    return function ssrRender(_ctx, _push, _parent) {
-      _ssrRenderPortal(_push, (_push) => {
-        _push(\`<div></div>\`)
-      }, _ctx.target, true, _parent)
-    }"
-  `)
+      return function ssrRender(_ctx, _push, _parent, _attrs) {
+        _ssrRenderTeleport(_push, (_push) => {
+          _push(\`<div></div>\`)
+        }, _ctx.target, true, _parent)
+      }"
+    `)
 
     expect(
-      compile(`<portal :target="target" :disabled="foo"><div/></portal>`).code
+      compile(`<teleport :to="target" :disabled="foo"><div/></teleport>`).code
     ).toMatchInlineSnapshot(`
-    "const { ssrRenderPortal: _ssrRenderPortal } = require(\\"@vue/server-renderer\\")
+      "const { ssrRenderTeleport: _ssrRenderTeleport } = require(\\"@vue/server-renderer\\")
 
-    return function ssrRender(_ctx, _push, _parent) {
-      _ssrRenderPortal(_push, (_push) => {
-        _push(\`<div></div>\`)
-      }, _ctx.target, _ctx.foo, _parent)
-    }"
-  `)
+      return function ssrRender(_ctx, _push, _parent, _attrs) {
+        _ssrRenderTeleport(_push, (_push) => {
+          _push(\`<div></div>\`)
+        }, _ctx.target, _ctx.foo, _parent)
+      }"
+    `)
   })
 })

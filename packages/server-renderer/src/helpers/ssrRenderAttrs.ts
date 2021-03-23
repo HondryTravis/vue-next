@@ -10,7 +10,8 @@ import {
   makeMap
 } from '@vue/shared'
 
-const shouldIgnoreProp = makeMap(`key,ref,innerHTML,textContent`)
+// leading comma for empty string ""
+const shouldIgnoreProp = makeMap(`,key,ref,innerHTML,textContent`)
 
 export function ssrRenderAttrs(
   props: Record<string, unknown>,
@@ -53,9 +54,7 @@ export function ssrRenderDynamicAttr(
   if (isBooleanAttr(attrKey)) {
     return value === false ? `` : ` ${attrKey}`
   } else if (isSSRSafeAttrName(attrKey)) {
-    return value === ''
-      ? ` ${attrKey}`
-      : ` ${attrKey}="${escapeHtml(value)}"`
+    return value === '' ? ` ${attrKey}` : ` ${attrKey}="${escapeHtml(value)}"`
   } else {
     console.warn(
       `[@vue/server-renderer] Skipped rendering unsafe attribute name: ${attrKey}`

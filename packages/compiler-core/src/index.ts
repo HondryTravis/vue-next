@@ -6,7 +6,9 @@ export {
   ParserOptions,
   TransformOptions,
   CodegenOptions,
-  HoistTransform
+  HoistTransform,
+  BindingMetadata,
+  BindingTypes
 } from './options'
 export { baseParse, TextModes } from './parse'
 export {
@@ -48,6 +50,10 @@ export {
   trackVForSlotScopes,
   trackSlotScopes
 } from './transforms/vSlot'
-export { resolveComponentType, buildProps } from './transforms/transformElement'
+export {
+  transformElement,
+  resolveComponentType,
+  buildProps
+} from './transforms/transformElement'
 export { processSlotOutlet } from './transforms/transformSlotOutlet'
 export { generateCodeFrame } from '@vue/shared'
