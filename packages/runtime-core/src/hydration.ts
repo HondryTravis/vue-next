@@ -5,10 +5,12 @@ import {
   Comment,
   Static,
   Fragment,
-  VNodeHook
+  VNodeHook,
+  createVNode,
+  createTextVNode
 } from './vnode'
 import { flushPostFlushCbs } from './scheduler'
-import { ComponentOptions, ComponentInternalInstance } from './component'
+import { ComponentInternalInstance } from './component'
 import { invokeDirectiveHook } from './directives'
 import { warn } from './warning'
 import { PatchFlags, ShapeFlags, isReservedProp, isOn } from '@vue/shared'
@@ -19,6 +21,7 @@ import {
   queueEffectWithSuspense
 } from './components/Suspense'
 import { TeleportImpl, TeleportVNode } from './components/Teleport'
+import { isAsyncWrapper } from './apiAsyncComponent'
 
 export type RootHydrateFunction = (
   vnode: VNode<Node, Element>,
@@ -158,7 +161,8 @@ export function createHydrationFunctions(
         if (shapeFlag & ShapeFlags.ELEMENT) {
           if (
             domType !== DOMNodeTypes.ELEMENT ||
-            vnode.type !== (node as Element).tagName.toLowerCase()
+            (vnode.type as string).toLowerCase() !==
+              (node as Element).tagName.toLowerCase()
           ) {
             nextNode = onMismatch()
           } else {
@@ -177,30 +181,41 @@ export function createHydrationFunctions(
           // on its sub-tree.
           vnode.slotScopeIds = slotScopeIds
           const container = parentNode(node)!
-          const hydrateComponent = () => {
-            mountComponent(
-              vnode,
-              container,
-              null,
-              parentComponent,
-              parentSuspense,
-              isSVGContainer(container),
-              optimized
-            )
-          }
-          // async component
-          const loadAsync = (vnode.type as ComponentOptions).__asyncLoader
-          if (loadAsync) {
-            loadAsync().then(hydrateComponent)
-          } else {
-            hydrateComponent()
-          }
+          mountComponent(
+            vnode,
+            container,
+            null,
+            parentComponent,
+            parentSuspense,
+            isSVGContainer(container),
+            optimized
+          )
+
           // component may be async, so in the case of fragments we cannot rely
           // on component's rendered output to determine the end of the fragment
           // instead, we do a lookahead to find the end anchor node.
           nextNode = isFragmentStart
             ? locateClosingAsyncAnchor(node)
             : nextSibling(node)
+
+          // #3787
+          // if component is async, it may get moved / unmounted before its
+          // inner component is loaded, so we need to give it a placeholder
+          // vnode that matches its adopted DOM.
+          if (isAsyncWrapper(vnode)) {
+            let subTree
+            if (isFragmentStart) {
+              subTree = createVNode(Fragment)
+              subTree.anchor = nextNode
+                ? nextNode.previousSibling
+                : container.lastChild
+            } else {
+              subTree =
+                node.nodeType === 3 ? createTextVNode('') : createVNode('div')
+            }
+            subTree.el = node
+            vnode.component!.subTree = subTree
+          }
         } else if (shapeFlag & ShapeFlags.TELEPORT) {
           if (domType !== DOMNodeTypes.COMMENT) {
             nextNode = onMismatch()
@@ -359,6 +374,8 @@ export function createHydrationFunctions(
           slotScopeIds,
           optimized
         )
+      } else if (vnode.type === Text && !vnode.children) {
+        continue
       } else {
         hasMismatch = true
         if (__DEV__ && !hasWarned) {
